@@ -16,12 +16,24 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // --- MONGODB CONNECTION ---
-// Using 127.0.0.1 is safer than localhost for Node.js
-mongoose.connect('mongodb+srv://eliteadmin:vwNgyGly1PKqC72V@cluster0.5zj6yth.mongodb.net/elite-connect?appName=Cluster0 ')
-  .then(() => console.log('✅ Connected to MongoDB'))
+// Updated to use your specific MongoDB Atlas URI
+const mongoURI = process.env.MONGODB_URI || 'mongodb+srv://eliteadmin:vwNgyGly1PKqC72V@cluster0.5zj6yth.mongodb.net/elite-connect?appName=Cluster0';
+
+mongoose.connect(mongoURI)
+  .then(async () => {
+    console.log('✅ Connected to MongoDB');
+    
+    // --- FIX FOR DUPLICATE KEY ERROR ---
+    try {
+      await mongoose.connection.collection('users').dropIndex('nullifier_hash_1');
+      console.log('🧹 Cleaned up old database index (nullifier_hash_1)');
+    } catch (e) {
+      // Index likely doesn't exist, which is fine.
+    }
+  })
   .catch(err => {
     console.error('❌ MongoDB Connection Error:', err);
-    console.log('⚠️  Please ensure MongoDB is running (run "mongod" in terminal)');
+    console.log('⚠️  Please ensure MongoDB is running (or MONGODB_URI is set correctly)');
   });
 
 // --- SCHEMAS ---
@@ -80,7 +92,6 @@ const authenticate = async (req, res, next) => {
       req.user = user;
       next();
     } else {
-      // Token exists but user not in DB (DB was reset?)
       res.status(401).json({ success: false, error: "User not found" });
     }
   } catch (err) {
@@ -89,6 +100,12 @@ const authenticate = async (req, res, next) => {
 };
 
 // --- ROUTES ---
+
+// 0. HEALTH CHECK
+// Added so you can verify your deployment easily
+app.get('/api/health', (req, res) => {
+  res.status(200).send('OK');
+});
 
 // 1. LOGIN
 app.post('/api/auth/login', async (req, res) => {
@@ -118,7 +135,6 @@ app.post('/api/auth/login', async (req, res) => {
       await user.save();
     }
 
-    // Simple token strategy: "token_" + worldId
     const token = `token_${worldId}`;
     res.json({ success: true, token, isNew: !user.name });
   } catch (err) {
@@ -140,7 +156,6 @@ app.post('/api/auth/onboard', authenticate, async (req, res) => {
 
 // 3. ME
 app.get('/api/me', authenticate, async (req, res) => {
-  // Check subscription expiration
   if (req.user.subscription.active && req.user.subscription.expiresAt) {
     if (new Date() > req.user.subscription.expiresAt) {
       req.user.subscription.active = false;
@@ -164,7 +179,6 @@ app.get('/api/explore', authenticate, async (req, res) => {
 
     if (randomUsers.length === 0) return res.json({ success: true, profile: null });
     
-    // Don't leak sensitive info
     const p = randomUsers[0];
     const safeProfile = { worldId: p.worldId, name: p.name, age: p.age, gender: p.gender, bio: p.bio, avatarColor: p.avatarColor };
     
