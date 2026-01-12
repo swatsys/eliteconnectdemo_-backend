@@ -18,24 +18,6 @@ app.use(bodyParser.json());
 // --- MONGODB CONNECTION ---
 const mongoURI = process.env.MONGODB_URI || 'mongodb+srv://eliteadmin:vwNgyGly1PKqC72V@cluster0.5zj6yth.mongodb.net/elite-connect?appName=Cluster0';
 
-mongoose.connect(mongoURI)
-  .then(async () => {
-    console.log('✅ Connected to MongoDB');
-    
-    // --- CRITICAL FIX: NUKE ALL INDEXES ---
-    // This handles the case where old schemas left behind incompatible unique indexes
-    try {
-      console.log('🧹 Attempting to clear old indexes...');
-      await mongoose.connection.collection('users').dropIndexes();
-      console.log('✅ All indexes dropped. Mongoose will rebuild necessary ones.');
-    } catch (e) {
-      console.log('ℹ️ Index drop skipped (likely new DB):', e.message);
-    }
-  })
-  .catch(err => {
-    console.error('❌ MongoDB Connection Error:', err);
-  });
-
 // --- SCHEMAS ---
 const userSchema = new mongoose.Schema({
   worldId: { type: String, unique: true, required: true },
@@ -145,7 +127,6 @@ app.post('/api/auth/login', async (req, res) => {
     res.json({ success: true, token, isNew: !user.name });
   } catch (err) {
     console.error("Login Critical Error:", err);
-    // RETURN ACTUAL ERROR TO FRONTEND
     res.status(500).json({ success: false, error: "DB Error: " + err.message });
   }
 });
@@ -314,4 +295,28 @@ app.post('/api/chat/send', authenticate, async (req, res) => {
   res.json({ success: true });
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Backend running on port ${PORT}`));
+// CONNECT AND START SERVER
+mongoose.connect(mongoURI)
+  .then(async () => {
+    console.log('✅ Connected to MongoDB');
+    
+    // --- FIX: Aggressively drop legacy indexes ---
+    try {
+      const collection = mongoose.connection.collection('users');
+      // Attempt to drop the specific conflicting index
+      try {
+        await collection.dropIndex('nullifier_hash_1');
+        console.log('✅ Dropped conflicting index: nullifier_hash_1');
+      } catch (err) {
+        // Ignore error if index doesn't exist
+        console.log('ℹ️ Index check: nullifier_hash_1 not found or already dropped.');
+      }
+    } catch (e) {
+      console.log('⚠️ Warning during index cleanup:', e.message);
+    }
+
+    app.listen(PORT, '0.0.0.0', () => console.log(`Backend running on port ${PORT}`));
+  })
+  .catch(err => {
+    console.error('❌ MongoDB Connection Error:', err);
+  });
