@@ -90,44 +90,73 @@ app.get('/api/health', (req, res) => {
   res.status(200).send('OK');
 });
 
-// 1. LOGIN
+// 1. LOGIN (ROBUST UPSERT)
 app.post('/api/auth/login', async (req, res) => {
   console.log("Login attempt Body:", req.body);
   const { proof } = req.body;
   let worldId;
 
+  // 1. Extract worldId safely
   if (proof === 'mock') {
     worldId = 'mock_user_' + Math.floor(Math.random() * 100000); 
+  } else if (typeof proof === 'object' && proof.nullifier_hash) {
+    worldId = proof.nullifier_hash;
   } else {
-    worldId = proof?.nullifier_hash;
+     // Fallback for different proof structures
+    worldId = proof?.nullifier_hash || proof?.uuid; 
   }
 
   console.log("Derived World ID:", worldId);
 
-  if (!worldId) return res.status(400).json({ success: false, error: "Invalid ID: nullifier_hash missing" });
+  // 2. Validate worldId
+  if (!worldId) {
+      return res.status(400).json({ success: false, error: "Invalid ID: Missing nullifier_hash or proof data." });
+  }
 
   try {
+    // 3. Try to find existing user
     let user = await User.findOne({ worldId });
-    let isNew = false;
 
-    if (!user) {
-      console.log("Creating new user for:", worldId);
-      isNew = true;
-      user = new User({
-        worldId,
-        balance: 25,
-        avatarColor: getRandomGradient(),
-        likes: []
-      });
-      await user.save();
-      console.log("User saved successfully");
+    if (user) {
+      console.log("User found, logging in:", worldId);
+      const token = `token_${worldId}`;
+      return res.json({ success: true, token, isNew: !user.name });
     }
 
+    // 4. If not found, create new user
+    console.log("Creating new user for:", worldId);
+    user = new User({
+      worldId,
+      balance: 25,
+      avatarColor: getRandomGradient(),
+      likes: []
+    });
+
+    await user.save();
+    console.log("User saved successfully");
+    
     const token = `token_${worldId}`;
-    res.json({ success: true, token, isNew: !user.name });
+    return res.json({ success: true, token, isNew: true });
+
   } catch (err) {
     console.error("Login Critical Error:", err);
-    res.status(500).json({ success: false, error: "DB Error: " + err.message });
+
+    // 5. Graceful Recovery: If we get a duplicate key error (E11000), it means 
+    // the user actually DOES exist (race condition), so we should just log them in.
+    if (err.code === 11000) {
+        console.log("⚠️ Race condition detected (E11000). Recovering by fetching user...");
+        try {
+            const existingUser = await User.findOne({ worldId });
+            if (existingUser) {
+                const token = `token_${worldId}`;
+                return res.json({ success: true, token, isNew: !existingUser.name });
+            }
+        } catch (recoveryErr) {
+            console.error("Recovery failed:", recoveryErr);
+        }
+    }
+
+    return res.status(500).json({ success: false, error: "DB Error: " + err.message });
   }
 });
 
@@ -301,14 +330,23 @@ mongoose.connect(mongoURI)
     console.log('✅ Connected to MongoDB');
     
     // --- CRITICAL FIX: AGGRESSIVE INDEX CLEANUP ---
-    // The previous error "duplicate key error... index: nullifier_hash_1" persists because
-    // the old index is still there. We MUST drop it.
     try {
-      console.log('🧹 Dropping ALL indexes on users collection to fix conflicts...');
-      await mongoose.connection.collection('users').dropIndexes();
-      console.log('✅ Indexes dropped. Mongoose will rebuild valid ones.');
+      console.log('🧹 Cleanup: Checking for legacy indexes...');
+      const collection = mongoose.connection.collection('users');
+      // Drop the specific problematic index if it exists
+      try {
+        await collection.dropIndex('nullifier_hash_1');
+        console.log('✅ Legacy index nullifier_hash_1 dropped.');
+      } catch (e) {
+        // Index might not exist, which is fine
+      }
+      
+      // Also ensure we don't have other conflicting unique indexes
+      // Uncomment the next line if you want to wipe ALL indexes to be safe (Recommended for dev)
+      // await collection.dropIndexes(); 
+      
     } catch (e) {
-      console.log('ℹ️ Index drop info (safe to ignore if new DB):', e.message);
+      console.log('ℹ️ Index cleanup info:', e.message);
     }
 
     app.listen(PORT, '0.0.0.0', () => console.log(`Backend running on port ${PORT}`));
