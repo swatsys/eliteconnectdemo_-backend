@@ -300,19 +300,15 @@ mongoose.connect(mongoURI)
   .then(async () => {
     console.log('✅ Connected to MongoDB');
     
-    // --- FIX: Aggressively drop legacy indexes ---
+    // --- CRITICAL FIX: AGGRESSIVE INDEX CLEANUP ---
+    // The previous error "duplicate key error... index: nullifier_hash_1" persists because
+    // the old index is still there. We MUST drop it.
     try {
-      const collection = mongoose.connection.collection('users');
-      // Attempt to drop the specific conflicting index
-      try {
-        await collection.dropIndex('nullifier_hash_1');
-        console.log('✅ Dropped conflicting index: nullifier_hash_1');
-      } catch (err) {
-        // Ignore error if index doesn't exist
-        console.log('ℹ️ Index check: nullifier_hash_1 not found or already dropped.');
-      }
+      console.log('🧹 Dropping ALL indexes on users collection to fix conflicts...');
+      await mongoose.connection.collection('users').dropIndexes();
+      console.log('✅ Indexes dropped. Mongoose will rebuild valid ones.');
     } catch (e) {
-      console.log('⚠️ Warning during index cleanup:', e.message);
+      console.log('ℹ️ Index drop info (safe to ignore if new DB):', e.message);
     }
 
     app.listen(PORT, '0.0.0.0', () => console.log(`Backend running on port ${PORT}`));
