@@ -14,7 +14,8 @@ const SUB_COST_WLD = 3;
 const SUB_DAYS = 30;      
 const FREE_UNLOCKS = 2;   
 
-app.use(cors());
+// Allow all CORS to prevent frontend blocking
+app.use(cors({ origin: '*' }));
 app.use(bodyParser.json());
 
 // --- MONGODB CONNECTION ---
@@ -23,19 +24,14 @@ const mongoURI = process.env.MONGODB_URI || 'mongodb+srv://eliteadmin:vwNgyGly1P
 mongoose.connect(mongoURI)
   .then(async () => {
     console.log('✅ Connected to MongoDB');
-    
-    // --- FIX FOR DUPLICATE KEY ERROR ---
     try {
-      // If user collection exists, try to drop the old index
       await mongoose.connection.collection('users').dropIndex('nullifier_hash_1');
-      console.log('🧹 Cleaned up old database index (nullifier_hash_1)');
     } catch (e) {
       // Index likely doesn't exist, which is fine.
     }
   })
   .catch(err => {
     console.error('❌ MongoDB Connection Error:', err);
-    console.log('⚠️  If on Render, ensure you have whitelisted "0.0.0.0/0" in MongoDB Atlas Network Access.');
   });
 
 // --- SCHEMAS ---
@@ -104,15 +100,17 @@ const authenticate = async (req, res, next) => {
 
 // 0. HEALTH CHECK & ROOT
 app.get('/', (req, res) => {
-  res.send('Elite Connect Backend is Running!');
+  res.send('Elite Connect Backend is Running! Access /api/health to check status.');
 });
 
 app.get('/api/health', (req, res) => {
+  console.log("Health check requested");
   res.status(200).send('OK');
 });
 
 // 1. LOGIN
 app.post('/api/auth/login', async (req, res) => {
+  console.log("Login attempt:", req.body);
   const { proof } = req.body;
   let worldId;
 
@@ -140,9 +138,10 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const token = `token_${worldId}`;
+    console.log("Login successful for:", worldId);
     res.json({ success: true, token, isNew: !user.name });
   } catch (err) {
-    console.error(err);
+    console.error("Login Error:", err);
     res.status(500).json({ success: false, error: "Login failed" });
   }
 });
