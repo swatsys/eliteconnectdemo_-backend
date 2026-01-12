@@ -4,8 +4,6 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 
 const app = express();
-// CRITICAL: Render provides the PORT via environment variable. 
-// If we ignore it and use 5001, the app might not route correctly.
 const PORT = process.env.PORT || 5001;
 
 // --- CONFIGURATION ---
@@ -14,7 +12,6 @@ const SUB_COST_WLD = 3;
 const SUB_DAYS = 30;      
 const FREE_UNLOCKS = 2;   
 
-// Allow all CORS to prevent frontend blocking
 app.use(cors({ origin: '*' }));
 app.use(bodyParser.json());
 
@@ -24,10 +21,15 @@ const mongoURI = process.env.MONGODB_URI || 'mongodb+srv://eliteadmin:vwNgyGly1P
 mongoose.connect(mongoURI)
   .then(async () => {
     console.log('✅ Connected to MongoDB');
+    
+    // --- CRITICAL FIX: NUKE ALL INDEXES ---
+    // This handles the case where old schemas left behind incompatible unique indexes
     try {
-      await mongoose.connection.collection('users').dropIndex('nullifier_hash_1');
+      console.log('🧹 Attempting to clear old indexes...');
+      await mongoose.connection.collection('users').dropIndexes();
+      console.log('✅ All indexes dropped. Mongoose will rebuild necessary ones.');
     } catch (e) {
-      // Index likely doesn't exist, which is fine.
+      console.log('ℹ️ Index drop skipped (likely new DB):', e.message);
     }
   })
   .catch(err => {
@@ -98,19 +100,17 @@ const authenticate = async (req, res, next) => {
 
 // --- ROUTES ---
 
-// 0. HEALTH CHECK & ROOT
 app.get('/', (req, res) => {
   res.send('Elite Connect Backend is Running! Access /api/health to check status.');
 });
 
 app.get('/api/health', (req, res) => {
-  console.log("Health check requested");
   res.status(200).send('OK');
 });
 
 // 1. LOGIN
 app.post('/api/auth/login', async (req, res) => {
-  console.log("Login attempt:", req.body);
+  console.log("Login attempt Body:", req.body);
   const { proof } = req.body;
   let worldId;
 
@@ -120,13 +120,16 @@ app.post('/api/auth/login', async (req, res) => {
     worldId = proof?.nullifier_hash;
   }
 
-  if (!worldId) return res.status(400).json({ success: false, error: "Invalid ID" });
+  console.log("Derived World ID:", worldId);
+
+  if (!worldId) return res.status(400).json({ success: false, error: "Invalid ID: nullifier_hash missing" });
 
   try {
     let user = await User.findOne({ worldId });
     let isNew = false;
 
     if (!user) {
+      console.log("Creating new user for:", worldId);
       isNew = true;
       user = new User({
         worldId,
@@ -135,14 +138,15 @@ app.post('/api/auth/login', async (req, res) => {
         likes: []
       });
       await user.save();
+      console.log("User saved successfully");
     }
 
     const token = `token_${worldId}`;
-    console.log("Login successful for:", worldId);
     res.json({ success: true, token, isNew: !user.name });
   } catch (err) {
-    console.error("Login Error:", err);
-    res.status(500).json({ success: false, error: "Login failed" });
+    console.error("Login Critical Error:", err);
+    // RETURN ACTUAL ERROR TO FRONTEND
+    res.status(500).json({ success: false, error: "DB Error: " + err.message });
   }
 });
 
