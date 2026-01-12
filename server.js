@@ -4,7 +4,9 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 
 const app = express();
-const PORT = 5001;
+// CRITICAL: Render provides the PORT via environment variable. 
+// If we ignore it and use 5001, the app might not route correctly.
+const PORT = process.env.PORT || 5001;
 
 // --- CONFIGURATION ---
 const PRICE_PER_CHAT = 5; 
@@ -16,7 +18,6 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // --- MONGODB CONNECTION ---
-// Updated to use your specific MongoDB Atlas URI
 const mongoURI = process.env.MONGODB_URI || 'mongodb+srv://eliteadmin:vwNgyGly1PKqC72V@cluster0.5zj6yth.mongodb.net/elite-connect?appName=Cluster0';
 
 mongoose.connect(mongoURI)
@@ -25,6 +26,7 @@ mongoose.connect(mongoURI)
     
     // --- FIX FOR DUPLICATE KEY ERROR ---
     try {
+      // If user collection exists, try to drop the old index
       await mongoose.connection.collection('users').dropIndex('nullifier_hash_1');
       console.log('🧹 Cleaned up old database index (nullifier_hash_1)');
     } catch (e) {
@@ -33,7 +35,7 @@ mongoose.connect(mongoURI)
   })
   .catch(err => {
     console.error('❌ MongoDB Connection Error:', err);
-    console.log('⚠️  Please ensure MongoDB is running (or MONGODB_URI is set correctly)');
+    console.log('⚠️  If on Render, ensure you have whitelisted "0.0.0.0/0" in MongoDB Atlas Network Access.');
   });
 
 // --- SCHEMAS ---
@@ -81,7 +83,6 @@ const authenticate = async (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
   
-  // Format: "token_WORLDID"
   const parts = token.split('_');
   if (parts.length < 2) return res.status(401).json({ success: false, error: "Invalid token format" });
 
@@ -101,8 +102,11 @@ const authenticate = async (req, res, next) => {
 
 // --- ROUTES ---
 
-// 0. HEALTH CHECK
-// Added so you can verify your deployment easily
+// 0. HEALTH CHECK & ROOT
+app.get('/', (req, res) => {
+  res.send('Elite Connect Backend is Running!');
+});
+
 app.get('/api/health', (req, res) => {
   res.status(200).send('OK');
 });
