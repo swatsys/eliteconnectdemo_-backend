@@ -99,18 +99,16 @@ app.post('/api/auth/login', async (req, res) => {
   // 1. Extract worldId safely
   if (proof === 'mock') {
     worldId = 'mock_user_' + Math.floor(Math.random() * 100000); 
-  } else if (typeof proof === 'object' && proof.nullifier_hash) {
-    worldId = proof.nullifier_hash;
-  } else {
-     // Fallback for different proof structures
-    worldId = proof?.nullifier_hash || proof?.uuid; 
+  } else if (typeof proof === 'object' && proof !== null) {
+    // Handle different proof structures
+    worldId = proof.nullifier_hash || proof.uuid;
   }
 
   console.log("Derived World ID:", worldId);
 
   // 2. Validate worldId
   if (!worldId) {
-      return res.status(400).json({ success: false, error: "Invalid ID: Missing nullifier_hash or proof data." });
+      return res.status(400).json({ success: false, error: "Invalid ID: Missing nullifier_hash. Please try again." });
   }
 
   try {
@@ -141,10 +139,9 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) {
     console.error("Login Critical Error:", err);
 
-    // 5. Graceful Recovery: If we get a duplicate key error (E11000), it means 
-    // the user actually DOES exist (race condition), so we should just log them in.
+    // 5. Graceful Recovery: Race condition (E11000)
     if (err.code === 11000) {
-        console.log("⚠️ Race condition detected (E11000). Recovering by fetching user...");
+        console.log("⚠️ Race condition detected (E11000). Recovering...");
         try {
             const existingUser = await User.findOne({ worldId });
             if (existingUser) {
@@ -329,24 +326,14 @@ mongoose.connect(mongoURI)
   .then(async () => {
     console.log('✅ Connected to MongoDB');
     
-    // --- CRITICAL FIX: AGGRESSIVE INDEX CLEANUP ---
+    // --- NUCLEAR FIX: DROP ALL INDEXES ---
+    // This removes the "ghost" index causing E11000 nullifier_hash errors
     try {
-      console.log('🧹 Cleanup: Checking for legacy indexes...');
-      const collection = mongoose.connection.collection('users');
-      // Drop the specific problematic index if it exists
-      try {
-        await collection.dropIndex('nullifier_hash_1');
-        console.log('✅ Legacy index nullifier_hash_1 dropped.');
-      } catch (e) {
-        // Index might not exist, which is fine
-      }
-      
-      // Also ensure we don't have other conflicting unique indexes
-      // Uncomment the next line if you want to wipe ALL indexes to be safe (Recommended for dev)
-      // await collection.dropIndexes(); 
-      
+      console.log('🧹 Cleanup: Dropping ALL indexes on users collection...');
+      await mongoose.connection.collection('users').dropIndexes();
+      console.log('✅ All indexes dropped. Mongoose will rebuild valid ones.');
     } catch (e) {
-      console.log('ℹ️ Index cleanup info:', e.message);
+      console.log('ℹ️ Index cleanup info (safe to ignore if new):', e.message);
     }
 
     app.listen(PORT, '0.0.0.0', () => console.log(`Backend running on port ${PORT}`));
