@@ -326,14 +326,25 @@ mongoose.connect(mongoURI)
   .then(async () => {
     console.log('✅ Connected to MongoDB');
     
-    // --- NUCLEAR FIX: DROP ALL INDEXES ---
-    // This removes the "ghost" index causing E11000 nullifier_hash errors
+    // --- DATABASE SANITIZATION ---
+    // 1. Drop bad indexes
     try {
-      console.log('🧹 Cleanup: Dropping ALL indexes on users collection...');
+      console.log('🧹 Cleanup: Dropping indexes...');
       await mongoose.connection.collection('users').dropIndexes();
-      console.log('✅ All indexes dropped. Mongoose will rebuild valid ones.');
+      console.log('✅ Indexes dropped.');
     } catch (e) {
-      console.log('ℹ️ Index cleanup info (safe to ignore if new):', e.message);
+      console.log('ℹ️ Index info:', e.message);
+    }
+    
+    // 2. Delete corrupted users (missing worldId)
+    try {
+        console.log('🧹 Cleanup: Removing corrupted users...');
+        const result = await mongoose.connection.collection('users').deleteMany({
+            $or: [{ worldId: null }, { worldId: { $exists: false } }]
+        });
+        console.log(`✅ Deleted ${result.deletedCount} corrupted user records.`);
+    } catch (e) {
+        console.log('⚠️ Cleanup Error:', e.message);
     }
 
     app.listen(PORT, '0.0.0.0', () => console.log(`Backend running on port ${PORT}`));
