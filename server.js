@@ -7,12 +7,35 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // --- CONFIGURATION ---
-const PRICE_PER_CHAT = 5; 
-const SUB_COST_WLD = 3;   
-const SUB_DAYS = 30;      
-const FREE_UNLOCKS = 2;   
+const PRICE_PER_CHAT = 5;
+const SUB_COST_WLD = 3;
+const SUB_DAYS = 30;
+const FREE_UNLOCKS = 2;
 
-app.use(cors({ origin: '*' }));
+// CORS configuration for World App
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests from World App and development environments
+    const allowedOrigins = [
+      'https://worldapp.world',
+      'https://world.org',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      process.env.FRONTEND_URL
+    ].filter(Boolean);
+
+    if (!origin || allowedOrigins.includes(origin) || origin.includes('ngrok')) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all for now, tighten in production
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
 app.use(bodyParser.json());
 
 // --- MONGODB CONNECTION ---
